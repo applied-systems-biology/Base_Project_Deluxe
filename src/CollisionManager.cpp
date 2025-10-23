@@ -9,12 +9,13 @@
 //  See the LICENSE file provided with this code for the full license.
 
 #include "../include/CollisionManager.h"
+#include <geometrycentral/surface/exact_geodesics.h>
 
 #define REMOVAL_PROBABILITY .7
 
 using namespace std;
 
-CollisionManager::CollisionManager(Space* s): space(s), occupation_matrix(s->gc_mesh->nFaces(),0), dist_01(0.0, 1.0), heat_solver(*space->gc_geometry){}
+CollisionManager::CollisionManager(Space* s): space(s), occupation_matrix(s->gc_mesh->nFaces(),0), dist_01(0.0, 1.0){}
 
 void CollisionManager::checkCollisions(std::vector<Agent> agents) {
     // re-set occupation matrix:
@@ -29,8 +30,6 @@ void CollisionManager::checkCollisions(std::vector<Agent> agents) {
     for(int n_agent_a=0; n_agent_a <agents.size(); n_agent_a++) {
         unordered_set<geometrycentral::surface::Face> faces = agents[n_agent_a].findFacesWithinRadius();
 
-        bool computed_log_map = false;
-        geometrycentral::surface::VertexData<geometrycentral::Vector2> log_map;
 
         // now for each face we check if it's occupied by more than 1 agent:
         for (auto f: faces) {
@@ -56,16 +55,16 @@ void CollisionManager::checkCollisions(std::vector<Agent> agents) {
                     detected_collisions.insert(candidate_indices);
 
                     geometrycentral::surface::SurfacePoint start = agents[n_agent_a].gc_position;
-                    geometrycentral::surface::Vertex end = agents[n_agent_b].gc_position.nearestVertex();
+                    geometrycentral::surface::SurfacePoint end = agents[n_agent_b].gc_position;
 
-                    // avoid re-running the heat-method:
-                    // see docs: https://geometry-central.net/surface/algorithms/vector_heat_method/
-                    if (!computed_log_map) {
-                        log_map = heat_solver.computeLogMap(start);
-                        computed_log_map = true;
-                    }
+                    double radii_sum = agents[n_agent_a].getAgentRadius() + agents[n_agent_b].getAgentRadius();
 
-                    double total_length = log_map[end].norm();
+                    // local MMP algorithm:
+                    geometrycentral::surface::GeodesicAlgorithmExact geodesic_solver(*space->gc_mesh, *space->gc_geometry);
+                    geodesic_solver.propagate(start,
+                                                radii_sum, {end});
+
+                    double total_length = geodesic_solver.getDistance(end);
                     double length_difference = (agents[n_agent_b].getAgentRadius() + agents[n_agent_a].getAgentRadius()) - total_length;
 
                     if (length_difference < 0) {
@@ -76,10 +75,9 @@ void CollisionManager::checkCollisions(std::vector<Agent> agents) {
                     resolution_lengths[candidate_indices] = length_difference;
 
                     // the two agents are touching, compute the geodesic to get the resolving directions:
-                    geometrycentral::surface::TraceGeodesicResult result = traceGeodesic(*space->gc_geometry, start, log_map[end], geometrycentral::surface::defaultTraceOptions);
 
-                    geometrycentral::Vector2 resolving_direction_agent_a = -log_map[end].normalize();
-                    geometrycentral::Vector2 resolving_direction_agent_b = result.endingDir.normalize(); // this will already be in agent b's tangent plane
+                    geometrycentral::Vector2 resolving_direction_agent_a = (-1) *geodesic_solver.getLog(end).normalize();
+                    geometrycentral::Vector2 resolving_direction_agent_b = geodesic_solver.getDistanceGradient(end).normalize(); // this will already be in agent b's tangent plane
 
                     resolution_velocities[candidate_indices] = {resolving_direction_agent_b, resolving_direction_agent_a};
                 }

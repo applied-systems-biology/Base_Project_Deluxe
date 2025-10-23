@@ -34,7 +34,6 @@ private:
     std::map<std::pair<int, int>, std::vector<geometrycentral::Vector2>> resolution_velocities;
     std::map<std::pair<int, int>, double> resolution_lengths;
 
-    geometrycentral::surface::VectorHeatMethodSolver heat_solver;
     std::uniform_real_distribution<double> dist_01;
 };
 
